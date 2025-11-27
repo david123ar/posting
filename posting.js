@@ -1,13 +1,3 @@
-/**
- * AUTO WEEKLY BATCH GENERATOR
- * --------------------------------
- * ✔ Generates 70 posts (10/day × 7 days)
- * ✔ Stores in batches: batch1, batch2, ...
- * ✔ Automatically detects if 7 days passed
- * ✔ Only creates next batch if needed
- * ✔ Works with latest MongoDB driver
- */
-
 const { MongoClient } = require("mongodb");
 const axios = require("axios");
 const moment = require("moment");
@@ -107,18 +97,9 @@ function schedulePosts(episodes, startDate) {
 // ----------------------------
 // CREATE OR APPEND BATCH FOR 1 ACCOUNT
 // ----------------------------
-async function addBatchForAccount(accountBatches, allEpisodes) {
+async function addBatchForAccount(accountBatches, allEpisodes, startDate) {
   const existing = accountBatches || [];
   const batchNumber = existing.length + 1;
-
-  let startDate;
-
-  if (existing.length === 0) {
-    startDate = moment().startOf("day");
-  } else {
-    const last = existing[existing.length - 1];
-    startDate = moment(last.startDate).add(7, "days");
-  }
 
   const selectedEpisodes = pick70(allEpisodes);
   const scheduledPosts = schedulePosts(selectedEpisodes, startDate);
@@ -133,6 +114,16 @@ async function addBatchForAccount(accountBatches, allEpisodes) {
 }
 
 // ----------------------------
+// CHECK IF NEXT BATCH IS DUE
+// ----------------------------
+function isBatchDue(lastBatch) {
+  if (!lastBatch) return true; // No batch exists
+  const lastStart = moment(lastBatch.startDate);
+  const now = moment();
+  return now.diff(lastStart, "days") >= 7;
+}
+
+// ----------------------------
 // MAIN FUNCTION
 // ----------------------------
 async function postData() {
@@ -141,7 +132,6 @@ async function postData() {
 
   // Get existing doc
   let doc = await col.findOne({});
-
   if (!doc) {
     doc = {
       account1: [],
@@ -150,17 +140,29 @@ async function postData() {
     };
   }
 
+  const lastBatch = doc.account1[doc.account1.length - 1];
+
+  // Check if 7 days passed
+  if (!isBatchDue(lastBatch)) {
+    console.log("❌ Last batch is less than 7 days old. No new batch needed.");
+    process.exit(0);
+  }
+
   // Fetch episodes
   console.log("Fetching episodes...");
   const allEpisodes = await fetchAllEpisodes();
 
-  // Generate next batch for each account
-  console.log("Generating new weekly batch...");
-  doc.account1 = await addBatchForAccount(doc.account1, allEpisodes);
-  doc.account2 = await addBatchForAccount(doc.account2, allEpisodes);
-  doc.account3 = await addBatchForAccount(doc.account3, allEpisodes);
+  // Determine new batch start date
+  let startDate = lastBatch
+    ? moment(lastBatch.startDate).add(7, "days")
+    : moment().startOf("day");
 
-  // Insert or update
+  console.log("Generating new weekly batch...");
+  doc.account1 = await addBatchForAccount(doc.account1, allEpisodes, startDate);
+  doc.account2 = await addBatchForAccount(doc.account2, allEpisodes, startDate);
+  doc.account3 = await addBatchForAccount(doc.account3, allEpisodes, startDate);
+
+  // Save document
   if (!doc._id) {
     await col.insertOne(doc);
     console.log("✔ Inserted initial weekly batches.");
