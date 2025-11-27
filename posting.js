@@ -5,7 +5,7 @@
  * ✔ Stores in batches: batch1, batch2, ...
  * ✔ Automatically detects if 7 days passed
  * ✔ Only creates next batch if needed
- * ✔ Perfect for PM2 cron execution
+ * ✔ Works with latest MongoDB driver
  */
 
 const { MongoClient } = require("mongodb");
@@ -15,10 +15,7 @@ const moment = require("moment");
 // MongoDB
 const uri = "mongodb://admin:imperial_merta2030@147.93.123.140:27017/admin";
 const dbName = "mydatabase";
-const client = new MongoClient(uri, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-});
+const client = new MongoClient(uri);
 
 // 10 daily posting times
 const dailyTimes = [
@@ -57,7 +54,6 @@ async function fetchAllEpisodes() {
       );
 
       const eps = res.data?.data?.recentEpisodes || [];
-
       const filtered = eps.filter((e) => e.rawLabel !== "PREVIEW");
       all.push(...filtered);
 
@@ -118,10 +114,8 @@ async function addBatchForAccount(accountBatches, allEpisodes) {
   let startDate;
 
   if (existing.length === 0) {
-    // First batch ever
     startDate = moment().startOf("day");
   } else {
-    // Start next batch 7 days after previous
     const last = existing[existing.length - 1];
     startDate = moment(last.startDate).add(7, "days");
   }
@@ -160,25 +154,26 @@ async function postData() {
   console.log("Fetching episodes...");
   const allEpisodes = await fetchAllEpisodes();
 
-  // For each account, generate next batch
+  // Generate next batch for each account
   console.log("Generating new weekly batch...");
-
   doc.account1 = await addBatchForAccount(doc.account1, allEpisodes);
   doc.account2 = await addBatchForAccount(doc.account2, allEpisodes);
   doc.account3 = await addBatchForAccount(doc.account3, allEpisodes);
 
-  // Save document
+  // Insert or update
   if (!doc._id) {
     await col.insertOne(doc);
     console.log("✔ Inserted initial weekly batches.");
   } else {
     await col.updateOne(
       { _id: doc._id },
-      { $set: {
-        account1: doc.account1,
-        account2: doc.account2,
-        account3: doc.account3
-      }}
+      {
+        $set: {
+          account1: doc.account1,
+          account2: doc.account2,
+          account3: doc.account3,
+        },
+      }
     );
     console.log("✔ Added new weekly batch.");
   }
